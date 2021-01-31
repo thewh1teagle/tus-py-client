@@ -6,12 +6,13 @@ from urllib.parse import urljoin
 import requests
 import aiohttp
 
-from tusclient.uploader.baseuploader import BaseUploader
+from tusclient.uploader.baseuploader import BaseUploader, BaseStreamUploader
 
 from tusclient.exceptions import TusUploadFailed, TusCommunicationError
-from tusclient.request import TusRequest, AsyncTusRequest, catch_requests_error
+from tusclient.request import TusRequest, AsyncTusRequest, catch_requests_error, TusStreamRequest
 
 from tqdm import tqdm
+
 
 def _verify_upload(request: TusRequest):
     if request.status_code == 204:
@@ -19,6 +20,108 @@ def _verify_upload(request: TusRequest):
     else:
         raise TusUploadFailed('', request.status_code,
                               request.response_content)
+
+
+class StreamUploader(BaseStreamUploader):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.chunk = None
+
+
+    def upload_chunk(self):
+        """
+        Upload chunk of file.
+        """
+        self._retried = 0
+        if not self.url:
+            self.set_url(self.create_url())
+            self.offset = 0
+        self._do_request()
+        self.offset = int(self.request.response_headers.get('upload-offset'))
+
+    def set_current_chunk(self, chunk: bytes):
+        self.chunk = chunk
+
+
+    @catch_requests_error
+    def create_url(self):
+        """
+        Return upload url.
+
+        Makes request to tus server to create a new upload url for the required file upload.
+        """
+        resp = requests.post(
+            self.client.url, headers=self.get_url_creation_headers())
+        url = resp.headers.get("location")
+        if url is None:
+            msg = 'Attempt to retrieve create file url with status {}'.format(
+                resp.status_code)
+            raise TusCommunicationError(msg, resp.status_code, resp.content)
+        return urljoin(self.client.url, url)
+
+    def _do_request(self):
+        self.request = TusStreamRequest(self)
+        try:
+            self.request.perform(self.chunk)
+            _verify_upload(self.request)
+        except TusUploadFailed as error:
+            self._retry_or_cry(error)
+
+    def _retry_or_cry(self, error):
+        if self.retries > self._retried:
+            time.sleep(self.retry_delay)
+
+            self._retried += 1
+            try:
+                self.offset = self.get_offset()
+            except TusCommunicationError as err:
+                self._retry_or_cry(err)
+            else:
+                self._do_request()
+        else:
+            raise error
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class Uploader(BaseUploader):
@@ -105,6 +208,7 @@ class Uploader(BaseUploader):
                 self._do_request()
         else:
             raise error
+
 
 
 class AsyncUploader(BaseUploader):

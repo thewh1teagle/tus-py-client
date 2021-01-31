@@ -1,6 +1,7 @@
 from typing import Dict, Optional
 
-from tusclient.uploader import Uploader, AsyncUploader
+from tusclient.uploader import Uploader, AsyncUploader, StreamUploader
+from tusclient.uploader import 
 
 
 class TusClient:
@@ -51,6 +52,10 @@ class TusClient:
         """
         kwargs['client'] = self
         return Uploader(*args, **kwargs)
+
+    def stream_uploader(self, *args, **kwargs) -> StreamUploader:
+        kwargs['client'] = self
+        return StreamUploader(*args, **kwargs)
 
     def async_uploader(self, *args, **kwargs) -> AsyncUploader:
         kwargs['client'] = self

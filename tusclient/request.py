@@ -22,6 +22,60 @@ def catch_requests_error(func):
     return _wrapper
 
 
+
+class BaseTusStreamRequest:
+
+    def __init__(self, uploader):
+        self._url = uploader.url
+        self.response_headers = {}
+        self.status_code = None
+        self.response_content = None
+        # self.file = uploader.get_file_stream()
+        # self.file.seek(uploader.offset)
+
+        self._request_headers = {
+            'upload-offset': str(uploader.offset),
+            'Content-Type': 'application/offset+octet-stream'
+        }
+        self._request_headers.update(uploader.get_headers())
+        self._content_length = uploader.get_request_length()
+        self._upload_checksum = uploader.upload_checksum
+        self._checksum_algorithm = uploader.checksum_algorithm
+        self._checksum_algorithm_name = uploader.checksum_algorithm_name
+
+    def add_checksum(self, chunk: bytes):
+        if self._upload_checksum:
+            self._request_headers['upload-checksum'] = \
+                ' '.join((
+                    self._checksum_algorithm_name,
+                    base64.b64encode(
+                        self._checksum_algorithm(chunk).digest()
+                    ).decode('ascii'),
+                ))
+
+
+class TusStreamRequest(BaseTusStreamRequest):
+    """Class to handle async Tus upload requests"""
+    def perform(self, chunk: bytes):
+        """
+        Perform actual request.
+        """
+        try:
+            self.add_checksum(chunk)
+            resp = requests.patch(self._url, data=chunk,
+                                  headers=self._request_headers)
+            self.status_code = resp.status_code
+            self.response_content = resp.content
+            self.response_headers = {
+                k.lower(): v for k, v in resp.headers.items()}
+        except requests.exceptions.RequestException as error:
+            raise TusUploadFailed(error)
+
+
+
+
+
+
 class BaseTusRequest:
     """
     Http Request Abstraction.

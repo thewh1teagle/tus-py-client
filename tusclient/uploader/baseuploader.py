@@ -16,10 +16,142 @@ if TYPE_CHECKING:
     from tusclient.client import TusClient
 
 
+class BaseStreamUploader:
+    DEFAULT_HEADERS = {"Tus-Resumable": "1.0.0"}
+    DEFAULT_CHUNK_SIZE = MAXSIZE
+    CHECKSUM_ALGORITHM_PAIR = ("sha1", hashlib.sha1, )
+
+    def __init__(self, file_size, url: Optional[str] = None, client: Optional['TusClient'] = None,
+                 chunk_size: int = MAXSIZE, metadata: Optional[Dict] = None,
+                 retries: int = 0, retry_delay: int = 30,
+                 store_url=False, url_storage: Optional[Storage] = None,
+                 fingerprinter: Optional[interface.Fingerprint] = None,
+                 upload_checksum=False):
+
+        self.store_url = store_url
+        self.url_storage = url_storage
+        self.file_size = file_size
+        self.stop_at = self.file_size
+        self.client = client
+        self.metadata = metadata or {}
+        self.fingerprinter = fingerprinter or fingerprint.Fingerprint()
+        self.offset = 0
+        self.url = None
+        self.__init_url_and_offset(url)
+        self.chunk_size = chunk_size
+        self.retries = retries
+        self.request = None
+        self._retried = 0
+        self.retry_delay = retry_delay
+        self.upload_checksum = upload_checksum
+        self.__checksum_algorithm_name, self.__checksum_algorithm = \
+            self.CHECKSUM_ALGORITHM_PAIR
+
+    def get_headers(self):
+        """
+        Return headers of the uploader instance. This would include the headers of the
+        client instance.
+        """
+        client_headers = getattr(self.client, 'headers', {})
+        return dict(self.DEFAULT_HEADERS, **client_headers)
+
+    def get_url_creation_headers(self):
+        """Return headers required to create upload url"""
+        headers = self.get_headers()
+        headers['upload-length'] = str(self.file_size)
+        headers['upload-metadata'] = ','.join(self.encode_metadata())
+        return headers
+
+    @property
+    def checksum_algorithm(self):
+        """The checksum algorithm to be used for the Upload-Checksum extension. 
+        """
+        return self.__checksum_algorithm
+
+    @property
+    def checksum_algorithm_name(self):
+        """The name of the checksum algorithm to be used for the Upload-Checksum
+        extension.
+        """
+        return self.__checksum_algorithm_name
+
+    @catch_requests_error
+    def get_offset(self):
+        """
+        Return offset from tus server.
+
+        This is different from the instance attribute 'offset' because this makes an
+        http request to the tus server to retrieve the offset.
+        """
+        resp = requests.head(self.url, headers=self.get_headers())
+        offset = resp.headers.get('upload-offset')
+        if offset is None:
+            msg = 'Attempt to retrieve offset fails with status {}'.format(
+                resp.status_code)
+            raise TusCommunicationError(msg, resp.status_code, resp.content)
+        return int(offset)
+
+    def encode_metadata(self):
+        """
+        Return list of encoded metadata as defined by the Tus protocol.
+        """
+        encoded_list = []
+        for key, value in self.metadata.items():
+            key_str = str(key)  # dict keys may be of any object type.
+
+            # confirm that the key does not contain unwanted characters.
+            if re.search(r'^$|[\s,]+', key_str):
+                msg = 'Upload-metadata key "{}" cannot be empty nor contain spaces or commas.'
+                raise ValueError(msg.format(key_str))
+
+            value_bytes = value.encode('latin-1')
+            encoded_list.append('{} {}'.format(
+                key_str, b64encode(value_bytes).decode('ascii')))
+        return encoded_list
+
+    def __init_url_and_offset(self, url: Optional[str] = None):
+        """
+        Return the tus upload url.
+
+        If resumability is enabled, this would try to get the url from storage if available,
+        otherwise it would request a new upload url from the tus server.
+        """
+        if url:
+            self.set_url(url)
+
+        # if self.store_url and self.url_storage:
+        #     key = self.fingerprinter.get_fingerprint(self.get_file_stream())
+        #     self.set_url(self.url_storage.get_item(key))
+
+        if self.url:
+            self.offset = self.get_offset()
+
+    def set_url(self, url: str):
+        """Set the upload URL"""
+        self.url = url
+        # if self.store_url and self.url_storage:
+        #     key = self.fingerprinter.get_fingerprint(self.get_file_stream())
+        #     self.url_storage.set_item(key, url)
+
+    def get_request_length(self, chunk_size):
+        """
+        Return length of next chunk upload.
+        """
+        remainder = self.stop_at - self.offset
+        return chunk_size if remainder > self.chunk_size else remainder
+
+
+
+
+
+
+
+
+
+
 class BaseUploader:
     """
     Object to control upload related functions.
-
     :Attributes:
         - file_path (str):
             This is the path(absolute/relative) to the file that is intended for upload
@@ -68,7 +200,6 @@ class BaseUploader:
         - upload_checksum (bool):
             Whether or not to supply the Upload-Checksum header along with each
             chunk. Defaults to False.
-
     :Constructor Args:
         - file_path (str)
         - file_stream (Optional[file])
@@ -157,7 +288,6 @@ class BaseUploader:
     def get_offset(self):
         """
         Return offset from tus server.
-
         This is different from the instance attribute 'offset' because this makes an
         http request to the tus server to retrieve the offset.
         """
@@ -190,7 +320,6 @@ class BaseUploader:
     def __init_url_and_offset(self, url: Optional[str] = None):
         """
         Return the tus upload url.
-
         If resumability is enabled, this would try to get the url from storage if available,
         otherwise it would request a new upload url from the tus server.
         """
