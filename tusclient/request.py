@@ -8,6 +8,7 @@ import aiohttp
 
 from tusclient.exceptions import TusUploadFailed, TusCommunicationError
 
+from loguru import logger
 
 # Catches requests exceptions and throws custom tuspy errors.
 def catch_requests_error(func):
@@ -62,8 +63,11 @@ class TusStreamRequest(BaseTusStreamRequest):
         """
         try:
             self.add_checksum(chunk)
+            logger.info(f"actual request with size of {len(chunk)}")
             resp = requests.patch(self._url, data=chunk,
                                   headers=self._request_headers)
+            logger.info(f"Done actual request {len(chunk)}")
+            # breakpoint()
             self.status_code = resp.status_code
             self.response_content = resp.content
             self.response_headers = {

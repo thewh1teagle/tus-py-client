@@ -6,13 +6,14 @@ from urllib.parse import urljoin
 import requests
 import aiohttp
 
-from tusclient.uploader.baseuploader import BaseUploader, BaseStreamUploader
+from tusclient.uploader.baseuploader import BaseUploader, BaseManualUploader
 
 from tusclient.exceptions import TusUploadFailed, TusCommunicationError
 from tusclient.request import TusRequest, AsyncTusRequest, catch_requests_error, TusStreamRequest
 
 from tqdm import tqdm
 
+from loguru import logger
 
 def _verify_upload(request: TusRequest):
     if request.status_code == 204:
@@ -22,26 +23,28 @@ def _verify_upload(request: TusRequest):
                               request.response_content)
 
 
-class StreamUploader(BaseStreamUploader):
+class ManualUploader(BaseManualUploader):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.chunk = None
 
 
-    def upload_chunk(self):
+    def upload_chunk(self, chunk: bytes):
         """
         Upload chunk of file.
         """
+        logger.info(f"Chunk with size of {len(chunk)}")
+        self.chunk = chunk
         self._retried = 0
         if not self.url:
+            logger.info("Setting url...")
             self.set_url(self.create_url())
             self.offset = 0
         self._do_request()
         self.offset = int(self.request.response_headers.get('upload-offset'))
-
-    def set_current_chunk(self, chunk: bytes):
-        self.chunk = chunk
+        
+        
 
 
     @catch_requests_error
@@ -66,6 +69,8 @@ class StreamUploader(BaseStreamUploader):
             self.request.perform(self.chunk)
             _verify_upload(self.request)
         except TusUploadFailed as error:
+            logger.error(error)
+            
             self._retry_or_cry(error)
 
     def _retry_or_cry(self, error):

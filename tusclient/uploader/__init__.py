@@ -1,1 +1,1 @@
-from tusclient.uploader.uploader import AsyncUploader, Uploader
+from tusclient.uploader.uploader import AsyncUploader, Uploader, ManualUploader

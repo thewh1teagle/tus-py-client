@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from tusclient.client import TusClient
 
 
-class BaseStreamUploader:
+class BaseManualUploader:
     DEFAULT_HEADERS = {"Tus-Resumable": "1.0.0"}
     DEFAULT_CHUNK_SIZE = MAXSIZE
     CHECKSUM_ALGORITHM_PAIR = ("sha1", hashlib.sha1, )
@@ -133,19 +133,12 @@ class BaseStreamUploader:
         #     key = self.fingerprinter.get_fingerprint(self.get_file_stream())
         #     self.url_storage.set_item(key, url)
 
-    def get_request_length(self, chunk_size):
+    def get_request_length(self):
         """
         Return length of next chunk upload.
         """
         remainder = self.stop_at - self.offset
-        return chunk_size if remainder > self.chunk_size else remainder
-
-
-
-
-
-
-
+        return self.offset if remainder > self.chunk_size else remainder
 
 
 
